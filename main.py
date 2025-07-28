@@ -109,7 +109,33 @@ def create_qr_image(payload_str, filename):
     img.save(buffer, format="PNG")
     return filename, buffer.getvalue()
 
-def insert_batch_records(records):
+
+def create_qr_request(requested_count, user_name="system", requested_by="system") -> uuid.UUID:
+    conn = db_pool.getconn()
+    try:
+        cur = conn.cursor()
+        qr_request_id = uuid.uuid4()
+        now = datetime.utcnow()
+        cur.execute("""
+            INSERT INTO qrcode_request (
+                id, type, status, requested_count, created_count,
+                zip_url, user_name, requested_by, created_at, updated_at
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        """, (
+            str(qr_request_id), "Business", "Ready For Download", requested_count, requested_count,
+            str(qr_request_id)+"/business.zip", user_name, requested_by, now, now
+        ))
+        conn.commit()
+        return qr_request_id
+    except Exception as e:
+        conn.rollback()
+        logging.error("Failed to create QRRequest: %s", e)
+        raise
+    finally:
+        db_pool.putconn(conn)
+
+
+def insert_batch_records(records,qr_request_id):
     conn = db_pool.getconn()
     try:
         cur = conn.cursor()
@@ -117,11 +143,11 @@ def insert_batch_records(records):
             cur.execute("""
                 INSERT INTO qrcode_record (
                     id, code_id, ext_id, qr_code_url, qr_code_byte, content_type,
-                    status, type, created_at, updated_at
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    status, type, created_at, updated_at,qr_request_id
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """, (
                 str(uuid.uuid4()), r['code_id'], r['ext_id'], r['qr_code_url'], psycopg2.Binary(r['qr_code_byte']),
-                "image/png", "Active", "Business", r['created_at'], r['updated_at']
+                "image/png", "Active", "Business", r['created_at'], r['updated_at'],str(qr_request_id)
             ))
         conn.commit()
         cur.close()
@@ -168,11 +194,11 @@ def process_row(row, posid_idx, wallid_idx):
             f.write(f"Error for ext_id={row[wallid_idx]}, posid={row[posid_idx] if posid_idx != -1 else 'N/A'}: {str(e)}\n")
         return None
 
-def process_batch(batch_rows, posid_idx, wallid_idx, batch_num):
+def process_batch(batch_rows, posid_idx, wallid_idx, batch_num,qr_request_id):
     with ThreadPoolExecutor(max_workers=30) as executor:
         processed = list(executor.map(lambda r: process_row(r, posid_idx, wallid_idx), batch_rows))
         processed = [r for r in processed if r]
-        insert_batch_records(processed)
+        insert_batch_records(processed,qr_request_id)
         results.extend(processed)
 
     print(f"✅ Batch {batch_num} complete. Created: {len(processed)} records.")
@@ -192,19 +218,22 @@ def seed_qr_codes_from_csv():
 
         if wallid_idx == -1:
             raise ValueError("'wallid' column required")
-
+        
+        rows = list(reader)
+        qr_request_id = create_qr_request(requested_count=len(rows))
         batch_rows = []
         batch_num = 1
 
-        for row in reader:
+        for row in rows:
             batch_rows.append(row)
             if len(batch_rows) >= BATCH_SIZE:
-                process_batch(batch_rows, posid_idx, wallid_idx, batch_num)
+                process_batch(batch_rows, posid_idx, wallid_idx, batch_num, qr_request_id)
                 batch_rows = []
                 batch_num += 1
 
+
         if batch_rows:
-            process_batch(batch_rows, posid_idx, wallid_idx, batch_num)
+            process_batch(batch_rows, posid_idx, wallid_idx, batch_num,qr_request_id)
 
 if __name__ == "__main__":
     start = time.time()
