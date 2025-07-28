@@ -25,7 +25,7 @@ results = []
 # Constants
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 OUTPUT_FOLDER = os.path.join(BASE_DIR, "qr-records", "qrs")
-CSV_PATH = os.path.join(BASE_DIR, "files", "prod_merchant_259.csv")
+CSV_PATH = os.path.join(BASE_DIR, "files", "file.csv")
 ZIP_FOLDER = os.path.join(BASE_DIR, "qr-records", "zips")
 LOGO_PATH = "assets/logo.png"
 DB_DSN = "postgresql://gouser:gopassword@localhost:5432/kulushorturl"
@@ -93,30 +93,21 @@ def create_qr_image(payload_str, filename):
     qr.make(fit=True)
     matrix_size = len(qr.get_matrix())
 
-    # Step 1: Black-and-white for DB
-    bw_img = qr.make_image(fill_color="black", back_color="white").convert("RGBA")
-    bw_img_resized = bw_img.resize(FIXED_SIZE, resample=Image.Resampling.LANCZOS)
-
-    buffer = BytesIO()
-    bw_img_resized.save(buffer, format="PNG")
-    bw_bytes = buffer.getvalue()
-
-    # Step 2: Color version for saving on disk
-    color_img = qr.make_image(fill_color=FOREGROUND_COLOR[:3], back_color=BACKGROUND_COLOR[:3]).convert("RGBA")
-    color_img = color_img.resize(FIXED_SIZE, resample=Image.Resampling.LANCZOS)
-    color_img = stylize_finder_patterns(color_img, matrix_size, QR_BORDER)
+    img = qr.make_image(fill_color=FOREGROUND_COLOR[:3], back_color=BACKGROUND_COLOR[:3]).convert("RGBA")
+    img = img.resize(FIXED_SIZE, resample=Image.Resampling.LANCZOS)
+    img = stylize_finder_patterns(img, matrix_size, QR_BORDER)
 
     if os.path.exists(LOGO_PATH):
         logo = Image.open(LOGO_PATH).convert("RGBA")
         logo_size = int(FIXED_SIZE[0] * 0.2)
         logo = logo.resize((logo_size, logo_size), resample=Image.Resampling.LANCZOS)
         pos = ((FIXED_SIZE[0] - logo_size) // 2, (FIXED_SIZE[1] - logo_size) // 2)
-        color_img.paste(logo, pos, mask=logo)
+        img.paste(logo, pos, mask=logo)
 
-    color_img.save(filename)
-
-    return filename, bw_bytes  
-
+    img.save(filename)
+    buffer = BytesIO()
+    img.save(buffer, format="PNG")
+    return filename, buffer.getvalue()
 
 
 def create_qr_request(requested_count, user_name="system", requested_by="system") -> uuid.UUID:
@@ -151,11 +142,11 @@ def insert_batch_records(records,qr_request_id):
         for r in records:
             cur.execute("""
                 INSERT INTO qrcode_record (
-                    id, code_id, ext_id, qr_code_url, qr_code_byte, content_type,
+                    id, code_id, ext_id, qr_code_url, content_type,
                     status, type, created_at, updated_at,qr_request_id
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """, (
-                str(uuid.uuid4()), r['code_id'], r['ext_id'], r['qr_code_url'], psycopg2.Binary(r['qr_code_byte']),
+                str(uuid.uuid4()), r['code_id'], r['ext_id'], r['qr_code_url'],
                 "image/png", "Active", "Business", r['created_at'], r['updated_at'],str(qr_request_id)
             ))
         conn.commit()
@@ -194,7 +185,7 @@ def process_row(row, posid_idx, wallid_idx):
             "code_id": code_id,
             "ext_id": ext_id,
             "qr_code_url": file_path,
-            "qr_code_byte": qr_bytes,
+            # "qr_code_byte": qr_bytes,
             "created_at": now,
             "updated_at": now
         }
