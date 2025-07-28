@@ -25,7 +25,7 @@ results = []
 # Constants
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 OUTPUT_FOLDER = os.path.join(BASE_DIR, "qr-records", "qrs")
-CSV_PATH = os.path.join(BASE_DIR, "files", "test_data_business_1676.csv")
+CSV_PATH = os.path.join(BASE_DIR, "files", "prod_merchant_259.csv")
 ZIP_FOLDER = os.path.join(BASE_DIR, "qr-records", "zips")
 LOGO_PATH = "assets/logo.png"
 DB_DSN = "postgresql://gouser:gopassword@localhost:5432/kulushorturl"
@@ -93,21 +93,30 @@ def create_qr_image(payload_str, filename):
     qr.make(fit=True)
     matrix_size = len(qr.get_matrix())
 
-    img = qr.make_image(fill_color=FOREGROUND_COLOR[:3], back_color=BACKGROUND_COLOR[:3]).convert("RGBA")
-    img = img.resize(FIXED_SIZE, resample=Image.Resampling.LANCZOS)
-    img = stylize_finder_patterns(img, matrix_size, QR_BORDER)
+    # Step 1: Black-and-white for DB
+    bw_img = qr.make_image(fill_color="black", back_color="white").convert("RGBA")
+    bw_img_resized = bw_img.resize(FIXED_SIZE, resample=Image.Resampling.LANCZOS)
+
+    buffer = BytesIO()
+    bw_img_resized.save(buffer, format="PNG")
+    bw_bytes = buffer.getvalue()
+
+    # Step 2: Color version for saving on disk
+    color_img = qr.make_image(fill_color=FOREGROUND_COLOR[:3], back_color=BACKGROUND_COLOR[:3]).convert("RGBA")
+    color_img = color_img.resize(FIXED_SIZE, resample=Image.Resampling.LANCZOS)
+    color_img = stylize_finder_patterns(color_img, matrix_size, QR_BORDER)
 
     if os.path.exists(LOGO_PATH):
         logo = Image.open(LOGO_PATH).convert("RGBA")
         logo_size = int(FIXED_SIZE[0] * 0.2)
         logo = logo.resize((logo_size, logo_size), resample=Image.Resampling.LANCZOS)
         pos = ((FIXED_SIZE[0] - logo_size) // 2, (FIXED_SIZE[1] - logo_size) // 2)
-        img.paste(logo, pos, mask=logo)
+        color_img.paste(logo, pos, mask=logo)
 
-    img.save(filename)
-    buffer = BytesIO()
-    img.save(buffer, format="PNG")
-    return filename, buffer.getvalue()
+    color_img.save(filename)
+
+    return filename, bw_bytes  
+
 
 
 def create_qr_request(requested_count, user_name="system", requested_by="system") -> uuid.UUID:
