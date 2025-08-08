@@ -25,7 +25,7 @@ results = []
 # Constants
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 OUTPUT_FOLDER = os.path.join(BASE_DIR, "qr-records", "qrs")
-CSV_PATH = os.path.join(BASE_DIR, "files", "file.csv")
+CSV_PATH = os.path.join(BASE_DIR, "files", "stage-selfonboard.csv")
 ZIP_FOLDER = os.path.join(BASE_DIR, "qr-records", "zips")
 LOGO_PATH = "assets/logo.png"
 DB_DSN = "postgresql://gouser:gopassword@localhost:5432/kulushorturl"
@@ -166,9 +166,9 @@ def zip_and_cleanup(image_folder, batch_index, records_batch):
                 zipf.write(file_path, arcname=os.path.basename(file_path))
                 os.remove(file_path)
 
-def process_row(row, posid_idx, wallid_idx):
+def process_row(row, posid_idx, wallid_idx,qr_request_id):
     try:
-        ext_id = row[wallid_idx].strip()
+        ext_id = row[wallid_idx].strip().zfill(11)
         code_id = row[posid_idx].strip().zfill(6) if posid_idx != -1 and row[posid_idx].strip() else generate_code_id()
         if not ext_id or code_id in seen_code_ids:
             return None
@@ -179,13 +179,12 @@ def process_row(row, posid_idx, wallid_idx):
         full_path = os.path.join(OUTPUT_FOLDER, f"{code_id}.png")
         _, _, trimmed_path = full_path.partition("qr-records/")
         file_path, qr_bytes = create_qr_image(payload, os.path.join("qr-records", trimmed_path))
-
+        qr_code_url = f"{qr_request_id}/qr_codes/{code_id}.png"
         now = datetime.utcnow()
         return {
             "code_id": code_id,
             "ext_id": ext_id,
-            "qr_code_url": file_path,
-            # "qr_code_byte": qr_bytes,
+            "qr_code_url": qr_code_url,
             "created_at": now,
             "updated_at": now
         }
@@ -196,7 +195,7 @@ def process_row(row, posid_idx, wallid_idx):
 
 def process_batch(batch_rows, posid_idx, wallid_idx, batch_num,qr_request_id):
     with ThreadPoolExecutor(max_workers=30) as executor:
-        processed = list(executor.map(lambda r: process_row(r, posid_idx, wallid_idx), batch_rows))
+        processed = list(executor.map(lambda r: process_row(r, posid_idx, wallid_idx,qr_request_id), batch_rows))
         processed = [r for r in processed if r]
         insert_batch_records(processed,qr_request_id)
         results.extend(processed)
