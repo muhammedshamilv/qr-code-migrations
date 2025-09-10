@@ -161,9 +161,11 @@ def zip_and_cleanup(image_folder, batch_index, records_batch):
     zip_name = os.path.join(ZIP_FOLDER, f"qr_batch_{batch_index}.zip")
     with zipfile.ZipFile(zip_name, "w", zipfile.ZIP_DEFLATED) as zipf:
         for r in records_batch:
-            file_path = os.path.join(BASE_DIR, r["qr_code_url"])
+            qr_code_filename = os.path.basename(r["qr_code_url"])
+            file_path = os.path.join(OUTPUT_FOLDER, qr_code_filename)
+
             if os.path.exists(file_path):
-                zipf.write(file_path, arcname=os.path.basename(file_path))
+                zipf.write(file_path, arcname=qr_code_filename)
                 os.remove(file_path)
 
 def process_row(row, posid_idx, wallid_idx,qr_request_id):
